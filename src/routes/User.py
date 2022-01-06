@@ -1,4 +1,4 @@
-from flask import json, request, jsonify, make_response
+from flask import request, jsonify
 from src.service.instance import server
 import uuid
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -34,9 +34,7 @@ def get_all_users(current_user):
 
 @app.route('/user/<public_id>',methods=['GET'])
 @token_required
-def get_one_user(current_user,public_id):
-    if not current_user.admin:
-        return jsonify({'message' : 'Não é possivel executar essa chamada!'})
+def get_one_user(current_user,public_id):    
     
     user = User.query.filter_by(public_id=public_id).first()
     if not user:
@@ -46,25 +44,12 @@ def get_one_user(current_user,public_id):
     user_data['public_id'] = user.public_id
     user_data['name'] = user.name
     user_data['email'] = user.email
+    user_data['gender'] = user.gender
+    user_data['profession'] = user.profession
     user_data['password'] = user.password
     user_data['admin'] = user.admin
 
     return jsonify({'user':user_data})
-
-@app.route('/user',methods=['POST'])
-@token_required
-def create_user(current_user):
-    data = request.get_json()
-    hashed_password = generate_password_hash(data['password'],method='sha256')
-    new_user = User(public_id=str(uuid.uuid4()), 
-                    name=data['name'],
-                    email=data['email'],
-                    password=hashed_password,
-                    admin=False)
-    
-    db.session.add(new_user)
-    db.session.commit()
-    return jsonify({'message':'Usuario Criado corretamente!'})
 
 @app.route('/user/<public_id>', methods=['PUT'])
 @token_required
@@ -78,6 +63,8 @@ def promote_user(current_user,public_id):
 
     user.name = data['name']
     user.email = data['email']
+    user.gender = data['gender']
+    user.profession = data['profession']
     user.password = hashed_password
 
     db.session.commit()
@@ -99,14 +86,37 @@ def delete_user(current_user,public_id):
 def login():
     auth = request.authorization
     if not auth or not auth.username or not auth.password:
-        return make_response('A verificação falhou!',401,{'WWW-Authenticate':'Basic realm="Login required!'})
+        jsonify({'message' : 'Ops... Preencha corretamente o Email e a Senha'}),401
 
-    user = User.query.filter_by(name=auth.username).first()
+    user = User.query.filter_by(email=auth.username).first()
     if not user:
-        return make_response('A verificação falhou!',401,{'WWW-Authenticate':'Basic realm="Login required!'})
+        return jsonify({'message' : 'Ops... Verifique o usuario e a senha'}),401
     
     if check_password_hash(user.password,auth.password):
         token = bytes(jwt.encode({'public_id' : user.public_id, 'exp' : datetime.datetime.utcnow() + datetime.timedelta(minutes=30)}, app.config['SECRET_KEY']), encoding='utf8')
-        return jsonify({'token' : token.decode('UTF-8')})
+        return jsonify({'token' : token.decode('UTF-8'),'public_id':user.public_id,'admin':user.admin})
 
-    return make_response('A verificação falhou!',401,{'WWW-Authenticate':'Basic realm="Login required!'})
+    return jsonify({'message' : 'Ops... Senha incorreta!'}),401
+
+@app.route('/register',methods=['POST'])
+def register():
+    data = request.get_json()  
+    user = User.query.filter_by(email=data['email']).first()    
+    if user:
+        return jsonify({'message' : 'Ops... Aparentemente esse email ja esta cadastrado na base de dados'}),409
+    
+    if not data['name'] or not data['email']:
+        return jsonify({'message' : 'Ops... Aparentemente existem campos a ser preencidos!'}),409
+      
+    hashed_password = generate_password_hash(data['password'],method='sha256')
+    new_user = User(public_id=str(uuid.uuid4()), 
+                    name=data['name'],
+                    email=data['email'],
+                    gender=data['gender'],
+                    profession=data['profession'],
+                    password=hashed_password,
+                    admin=False)
+    
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'message':'Usuario Criado corretamente!'})
