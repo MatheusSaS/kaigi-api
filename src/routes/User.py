@@ -1,9 +1,11 @@
-from flask import request, jsonify
+from cmath import log
+from flask import request, jsonify, redirect
 from src.service.instance import server
 import uuid
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 import datetime
+from src.service.config import domain
 
 from src.controllers.User import User
 
@@ -15,16 +17,13 @@ app,db = server.app,server.db
 @token_required
 def get_all_users(current_user):
 
-    if not current_user.admin:
-        return jsonify({'message' : 'Não é possivel executar essa chamada!'})
-
     users = User.query.all()
     output = []
 
     for user in users:
         user_data = {}
         user_data['public_id'] = user.public_id
-        user_data['name'] = user.name
+        user_data['name'] = user.nome
         user_data['email'] = user.email
         user_data['password'] = user.password
         user_data['admin'] = user.admin
@@ -32,49 +31,71 @@ def get_all_users(current_user):
 
     return jsonify({'users':output})
 
-@app.route('/user/<public_id>',methods=['GET'])
+@app.route('/AlterPhoto', methods=['PUT'])
 @token_required
-def get_one_user(current_user,public_id):    
-    
-    user = User.query.filter_by(public_id=public_id).first()
+def AlterPhoto(current_user):   
+    try:
+        user = User.query.filter_by(public_id=current_user.public_id).first()
+        if not user:
+            return jsonify({'message':'Usuario não encontrado'})
+        
+        user.photo = request.get_json()
+
+        db.session.commit()       
+    except Exception as e:
+        return e 
+
+    return 'sucess'
+
+@app.route('/current_user',methods=['GET'])
+@token_required
+def current_user(current_user):    
+    try:
+        user = User.query.filter_by(public_id=current_user.public_id).first()
+        if not user:
+            return jsonify({'message':'Usuario não encontrado'})
+        user_data = {}
+        user_data['public_id'] = user.public_id
+        user_data['nome'] = user.nome
+        user_data['email'] = user.email
+        user_data['password'] = user.password
+        user_data['ddi'] = user.ddi
+        user_data['phone'] = user.phone 
+        user_data['photo'] = user.photo 
+        user_data['cpf_cnpj'] = user.cpf_cnpj
+        user_data['genero'] = user.genero
+        user_data['profissao'] = user.profissao
+        user_data['data_nascimento'] = user.data_nascimento    
+        user_data['session_id'] = user.session_id
+
+        return jsonify({'user':user_data})        
+    except Exception as e:
+        return e    
+
+@app.route('/user', methods=['PUT'])
+@token_required
+def promote_user(current_user):
+    user = User.query.filter_by(public_id=current_user.public_id).first()
     if not user:
         return jsonify({'message':'Usuario não encontrado'})
-    
-    user_data = {}
-    user_data['public_id'] = user.public_id
-    user_data['name'] = user.name
-    user_data['email'] = user.email
-    user_data['gender'] = user.gender
-    user_data['profession'] = user.profession
-    user_data['password'] = user.password
-    user_data['admin'] = user.admin
-
-    return jsonify({'user':user_data})
-
-@app.route('/user/<public_id>', methods=['PUT'])
-@token_required
-def promote_user(current_user,public_id):
-    user = User.query.filter_by(public_id=public_id).first()
-    if not user:
-        return jsonify({'message':'Usuario não encontrado'})
-
-    data = request.get_json()
-    hashed_password = generate_password_hash(data['password'],method='sha256')
-
-    user.name = data['name']
-    user.email = data['email']
-    user.gender = data['gender']
-    user.profession = data['profession']
-    user.password = hashed_password
+      
+    user.nome = request.form['nome'] 
+    user.email = request.form['email'] 
+    user.ddi = request.form['ddi'] 
+    user.phone  = request.form['phone'] 
+    user.cpf_cnpj = request.form['cpf_cnpj'] 
+    user.genero = request.form['genero'] 
+    user.profissao = request.form['profissao'] 
+    user.data_nascimento = request.form['data_nascimento'] 
 
     db.session.commit()
 
     return jsonify({'message':'Usuario alterado corretamente'})
 
-@app.route('/user/<public_id>',methods=['DELETE'])
+@app.route('/user',methods=['DELETE'])
 @token_required
-def delete_user(current_user,public_id):
-    user = User.query.filter_by(public_id=public_id).first()
+def delete_user(current_user):
+    user = User.query.filter_by(public_id=current_user.public_id).first()
     if not user:
         return jsonify({'message':'Usuario não encontrado'})
     
@@ -82,21 +103,21 @@ def delete_user(current_user,public_id):
     db.session.commit()
     return jsonify({'message':'Usuario deletado corretamente!'})
 
-@app.route('/login')
-def login():
-    auth = request.authorization
-    if not auth or not auth.username or not auth.password:
-        jsonify({'message' : 'Ops... Preencha corretamente o Email e a Senha'}),401
+@app.route('/login', methods=['POST'])
+def login():    
+    if not request.form['email'] or not request.form['password']:
+        return redirect(domain()+"login?message=Ops... Preencha corretamente o Email e a Senha")
 
-    user = User.query.filter_by(email=auth.username).first()
+    user = User.query.filter_by(email=request.form['email']).first()
     if not user:
-        return jsonify({'message' : 'Ops... Verifique o usuario e a senha'}),401
+        return redirect(domain()+"login?message=Ops... Verifique o usuario e a senha")
     
-    if check_password_hash(user.password,auth.password):
-        token = bytes(jwt.encode({'public_id' : user.public_id, 'exp' : datetime.datetime.utcnow() + datetime.timedelta(minutes=30)}, app.config['SECRET_KEY']), encoding='utf8')
-        return jsonify({'token' : token.decode('UTF-8'),'public_id':user.public_id,'admin':user.admin})
+    if check_password_hash(user.password,request.form['password']):
+        token = jwt.encode({'public_id' : user.public_id}, app.config['SECRET_KEY'])
+        
+        return redirect(domain()+"?token="+str(token))
 
-    return jsonify({'message' : 'Ops... Senha incorreta!'}),401
+    return redirect(domain()+"login?message=Ops... Senha incorreta!")
 
 @app.route('/register',methods=['POST'])
 def register():

@@ -14,17 +14,16 @@ def token_required(f):
         
         if 'x-access-token' in request.headers:
             token = request.headers['x-access-token']       
-
+        
         if not token:
             return jsonify({'message' : 'Token não encontrado'}),401
-       
+        
         try:
-            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256']) 
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])                    
             current_user = User.query.filter_by(public_id=data['public_id']).first()
-
         except:
             return jsonify({'message' : 'Ops... Aparentemente você não esta logado!'}),401
-      
+            
         return f(current_user, *args, **kwargs)
 
     return decorated
